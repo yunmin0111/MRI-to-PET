@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """
 Reconstruct held-out TEST PET volumes through the trained PET VQGAN.
-Saves original + reconstruction side by side and reports PSNR/SSIM.
-
-Model wiring follows vqgan3d_pet.py:
-    from vqgan3d import VQGAN3D
-    checkpoint has separate encoder/decoder/vq/discriminator state_dicts
-    forward: x_recon, vq_loss, idx, _ = model(x)
+Metrics: PSNR, SSIM, MAE, MSE (computed over brain voxels).
+Saves original + reconstruction and a per-volume metrics CSV.
 """
-import os, sys, glob, yaml, argparse
+import os, sys, glob, yaml, argparse, csv
 import numpy as np
 import torch
 import nibabel as nib
@@ -16,16 +12,38 @@ import nibabel as nib
 sys.path.insert(0, '/data/yunmin0111/Cor2Vox')
 from vqgan3d import VQGAN3D
 
+try:
+    from skimage.metrics import structural_similarity as sk_ssim
+    HAVE_SKIMAGE = True
+except Exception:
+    HAVE_SKIMAGE = False
 
-def psnr(a, b, data_range=2.0):   # data in [-1,1] -> range 2
+
+def psnr(a, b, data_range=2.0):
     mse = np.mean((a - b) ** 2)
     if mse == 0: return 99.0
     return 20 * np.log10(data_range) - 10 * np.log10(mse)
 
 
+def ssim_vol(orig, rec, mask, data_range=2.0):
+    """3D SSIM. skimage if available (whole volume), else masked fallback."""
+    if HAVE_SKIMAGE:
+        # SSIM needs full volume; compute on whole then it's fine (bg is -1 in both)
+        val = sk_ssim(orig, rec, data_range=data_range)
+        return float(val)
+    # fallback: simple global SSIM on brain voxels
+    a, b = orig[mask], rec[mask]
+    mu_a, mu_b = a.mean(), b.mean()
+    va, vb = a.var(), b.var()
+    cov = ((a - mu_a) * (b - mu_b)).mean()
+    c1 = (0.01 * data_range) ** 2; c2 = (0.03 * data_range) ** 2
+    return float(((2*mu_a*mu_b + c1)*(2*cov + c2)) / ((mu_a**2 + mu_b**2 + c1)*(va + vb + c2)))
+
+
 def load_model(cfg, ckpt_path, device):
     vq = cfg['model']['vqgan']
     model = VQGAN3D(
+        in_channels=1,
         embedding_dim=vq['embedding_dim'],
         num_embeddings=vq['num_embeddings'],
         base_channels=vq['base_channels'],
@@ -40,7 +58,7 @@ def load_model(cfg, ckpt_path, device):
         try: model.discriminator.load_state_dict(ck['discriminator'])
         except Exception: pass
     model.eval()
-    print(f"loaded checkpoint epoch {ck.get('epoch','?')}")
+    print(f"loaded checkpoint epoch {ck.get('epoch','?')} | skimage SSIM: {HAVE_SKIMAGE}")
     return model
 
 
@@ -62,30 +80,43 @@ def main():
 
     files = sorted(glob.glob(os.path.join(args.test_dir, '*.nii.gz')))
     if args.limit: files = files[:args.limit]
-    print(f"{len(files)} test volumes")
+    print(f"{len(files)} test volumes\n")
 
-    psnrs = []
+    rows = []
     for f in files:
         pid = os.path.basename(f).replace('.nii.gz', '')
-        vol = np.asarray(nib.load(f).get_fdata(), dtype=np.float32)  # already [-1,1]
-        x = torch.from_numpy(vol).float()[None, None].to(device)     # (1,1,D,H,W)
+        vol = np.asarray(nib.load(f).get_fdata(), dtype=np.float32)
+        x = torch.from_numpy(vol).float()[None, None].to(device)
         with torch.no_grad():
             x_recon, _, _, _ = model(x)
-        rec = x_recon[0, 0].cpu().numpy().astype(np.float32)
-        rec = np.clip(rec, -1, 1)
+        rec = np.clip(x_recon[0, 0].cpu().numpy().astype(np.float32), -1, 1)
 
-        # PSNR over brain voxels (orig > -0.99)
         brain = vol > -0.99
-        p = psnr(vol[brain], rec[brain])
-        psnrs.append(p)
+        o, r = vol[brain], rec[brain]
+        mse = float(np.mean((o - r) ** 2))
+        mae = float(np.mean(np.abs(o - r)))
+        ps  = psnr(o, r)
+        ss  = ssim_vol(vol, rec, brain)
+        rows.append({'id': pid, 'PSNR': ps, 'SSIM': ss, 'MAE': mae, 'MSE': mse})
 
         nib.save(nib.Nifti1Image(vol, np.eye(4)), os.path.join(args.out, 'orig',  f'{pid}.nii.gz'))
         nib.save(nib.Nifti1Image(rec, np.eye(4)), os.path.join(args.out, 'recon', f'{pid}.nii.gz'))
-        print(f"  {pid}: PSNR {p:.2f} dB")
+        print(f"  {pid}: PSNR {ps:.2f} | SSIM {ss:.4f} | MAE {mae:.4f} | MSE {mse:.5f}")
 
-    psnrs = np.array(psnrs)
-    print(f"\n=== TEST reconstruction PSNR: {psnrs.mean():.2f} +/- {psnrs.std():.2f} dB "
-          f"(n={len(psnrs)}, min {psnrs.min():.2f}, max {psnrs.max():.2f}) ===")
+    # CSV
+    csv_path = os.path.join(args.out, 'metrics.csv')
+    with open(csv_path, 'w', newline='') as fp:
+        w = csv.DictWriter(fp, fieldnames=['id', 'PSNR', 'SSIM', 'MAE', 'MSE'])
+        w.writeheader(); w.writerows(rows)
+
+    def stat(k):
+        v = np.array([r[k] for r in rows])
+        return v.mean(), v.std(), v.min(), v.max()
+    print("\n=== TEST reconstruction metrics (n=%d, brain voxels) ===" % len(rows))
+    for k, unit in [('PSNR', 'dB'), ('SSIM', ''), ('MAE', ''), ('MSE', '')]:
+        m, s, lo, hi = stat(k)
+        print(f"  {k:5s}: {m:.4f} +/- {s:.4f} {unit}  (min {lo:.4f}, max {hi:.4f})")
+    print(f"\nwrote {csv_path}")
 
 
 if __name__ == '__main__':
