@@ -1,0 +1,17 @@
+# MRI Encoder -> PET latent alignment (task 1)
+# Freeze PET VQGAN, train only MRI encoder to map MRI into PET latent space.
+data:
+  dataset_type: 'align_mri2pet'
+  dataset_config:
+    root: '/data/yunmin0111/dataset_pet_c2v'   # has petTr/petVal/petTs + mriTr/mriVal/mriTs
+    input_size: 128
+    depth_size: 128
+model:
+  model_name: "c2v_mri_align_pet"
+  # frozen PET VQGAN checkpoint (from task: PET-only VQGAN)
+  vqgan_checkpoint: 'results/c2v/c2v_vqgan_pet/checkpoint/vqgan_last.pth'
+  align_epochs: 100
+  vqgan:
+    embedding_dim: 4
+    num_embeddings: 1024
+    base_channels: 32

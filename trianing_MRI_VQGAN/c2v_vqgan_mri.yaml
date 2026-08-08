@@ -1,0 +1,20 @@
+# MRI-only VQGAN (task 2: independent MRI latent, no alignment)
+# Same architecture as PET VQGAN; data swapped to MRI (already [-1,1]).
+data:
+  dataset_type: 'mri_vqgan'
+  dataset_config:
+    img_folder: '/data/yunmin0111/dataset_pet_c2v/mri'   # -> mriTr / mriVal / mriTs
+    input_size: 128
+    depth_size: 128
+model:
+  model_name: "c2v_vqgan_mri"
+  vqgan:
+    embedding_dim: 4
+    num_embeddings: 1024
+    base_channels: 32
+    commitment_cost: 0.25
+    disc_weight: 0.5
+    perceptual_weight: 0.01
+    n_slices: 8
+    lr: 1.0e-4
+    epochs: 100
