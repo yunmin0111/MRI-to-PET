@@ -1,0 +1,21 @@
+# MRI->PET AutoEncoder (VQGAN): input=MRI, target=PET
+# encoder+decoder+VQ+discriminator all trained to make MRI latent PET-aligned.
+data:
+  dataset_type: 'align_mri2pet'
+  dataset_config:
+    root: '/data/yunmin0111/dataset_pet_c2v'   # petTr/Val/Ts + mriTr/Val/Ts
+    input_size: 128
+    depth_size: 128
+model:
+  model_name: "c2v_vqgan_mri2pet"
+  dist: 'l1'          # 'l1' or 'l2' (l2 adds MSE term)
+  l2_weight: 1.0
+  vqgan:
+    embedding_dim: 4
+    num_embeddings: 1024
+    base_channels: 32
+    commitment_cost: 0.25
+    disc_weight: 0.5
+    perceptual_weight: 0.01
+    lr: 1.0e-4
+    epochs: 100
