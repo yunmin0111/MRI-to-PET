@@ -1,0 +1,13 @@
+# 2D VQ-VAE with PCT offset-attention, MRI->PET slice translation
+data:
+  root: '/data/yunmin0111/dataset_pet_c2v'   # mriTr/petTr + Val + Ts
+  batch_size: 32
+model:
+  model_name: 'ae_offset_2d'
+  dist: 'l1'            # 'l1' or 'l2' (simple distance loss)
+  base_channels: 64
+  embedding_dim: 4
+  num_embeddings: 1024
+  commitment_cost: 0.25
+  lr: 1.0e-4
+  epochs: 100
