@@ -1,0 +1,15 @@
+# 2D VQ-VAE with Swin window attention, MRI->PET slice translation
+data:
+  root: '/data/yunmin0111/dataset_pet_c2v'
+  batch_size: 32
+model:
+  model_name: 'ae_swin_2d'
+  dist: 'l1'
+  base_channels: 64
+  embedding_dim: 4
+  num_embeddings: 1024
+  commitment_cost: 0.25
+  window_size: 4        # 8x8 latent -> 2x2 windows of 4x4
+  num_heads: 4
+  lr: 1.0e-4
+  epochs: 100
