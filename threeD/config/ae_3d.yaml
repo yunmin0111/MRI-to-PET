@@ -1,0 +1,17 @@
+# 3D VQ-VAE MRI->PET, 4x compression (128->32), 4^3 patch tokens (512)
+data:
+  root: '/data/yunmin0111/dataset_pet_c2v'
+  batch_size: 1        # 3D volumes are large
+model:
+  model_name: 'ae_3d'
+  dist: 'l1'
+  base_channels: 32
+  embedding_dim: 4
+  num_embeddings: 1024
+  commitment_cost: 0.25
+  patch: 4             # 4x4x4 patch -> 8^3=512 tokens
+  d_model: 256
+  window_size: 4       # swin only
+  num_heads: 4         # swin only
+  lr: 1.0e-4
+  epochs: 100
