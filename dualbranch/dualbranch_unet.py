@@ -75,11 +75,11 @@ class ResBlock(nn.Module):
     """
     def __init__(self, c_in, c_out):
         super().__init__()
-        self.n1 = GN(min(8, c_in))
+        self.n1 = GN(c_in)
         self.c1 = nn.Conv3d(c_in, c_out, 3, padding=1)
         # temb(256차원)를 c_out 채널 bias로 사영
         self.emb = nn.Linear(256, c_out)
-        self.n2 = GN(min(8, c_out))
+        self.n2 = GN(c_out)
         self.c2 = nn.Conv3d(c_out, c_out, 3, padding=1)
         # 채널 수가 바뀌면 skip도 1x1로 맞춤, 아니면 그대로 통과
         self.skip = nn.Conv3d(c_in, c_out, 1) if c_in != c_out else nn.Identity()
@@ -116,7 +116,7 @@ class WindowAttn3D(nn.Module):
         self.ws = ws
         self.heads = heads
         self.shift = shift            # 0 또는 ws//2(=2). 레이어마다 번갈아.
-        self.norm = GN(min(8, c))
+        self.norm = GN(c)
         self.qkv = nn.Conv3d(c, c * 3, 1)   # 1x1 conv로 q,k,v 한번에
         self.proj = nn.Conv3d(c, c, 1)      # 출력 사영
 
@@ -349,7 +349,7 @@ class DualBranchUNet(nn.Module):
         self.U1 = Up(base * 2)                                     # 64→128
         self.D1 = nn.ModuleList([ResBlock(base * 2 + base, base),          # +S128
                                  ResBlock(base, base)])
-        self.out = nn.Sequential(GN(min(8, base)), nn.SiLU(),
+        self.out = nn.Sequential(GN(base), nn.SiLU(),
                                  nn.Conv3d(base, 1, 3, padding=1))  # →[B,1,128³]
 
     def forward(self, x1, x2, timesteps, **kwargs):

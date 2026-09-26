@@ -61,6 +61,7 @@ class OurDualBranchBBDM(nn.Module):
         # m_t = t/T 선형. 인덱스 0..T 로 T+1개 만들어 t와 t-1을 쉽게 참조.
         T = num_timesteps
         m_t = np.linspace(0.0, 1.0, T + 1, dtype=np.float64)  # [T+1]
+        m_t[0] = 1e-4; m_t[-1] = 1.0 - 1e-4   # 양끝 0/1 회피 (var_t=0 나눗셈 방지)
         # 양 끝 수치안정: t=0 근처는 x0, t=T 근처는 y1 이 되도록 그대로 둬도 OK.
         var_t = 2.0 * self.max_var * (m_t - m_t ** 2)          # δ_t
 
@@ -106,53 +107,24 @@ class OurDualBranchBBDM(nn.Module):
     # ------------------------------------------------------------------
     @torch.no_grad()
     def sample(self, y1, y2, clip_denoised=False):
-        """
-        y1 : 전체 MRI  [B,1,128³]  (bridge 종점 = x_T)
-        y2 : 병변영역  [B,1,128³]  (조건, 매 step 동일)
-        반환 : 생성 PET [B,1,128³]
-        """
-        b = y1.shape[0]
-        dev = y1.device
-
-        # step 스케줄: T→0 방향으로 sample_step+1개 지점을 균등 분할
-        steps = list(reversed(
-            np.linspace(0, self.num_timesteps, self.sample_step + 1, dtype=int).tolist()))
-
-        x_t = y1.clone()   # x_T = 전체 MRI 에서 시작
-
-        for i in range(len(steps) - 1):
-            cs = steps[i]       # 현재 step (current)
-            ns = steps[i + 1]   # 다음 step (next), 마지막엔 0
-            t = torch.full((b,), cs, device=dev, dtype=torch.long)
-
-            # objective 예측
-            pred = self.denoise_fn(x_t, y2, timesteps=t)   # [B,1,128³]
-
-            # x0 한 스텝 추정: grad objective에서 x0 ≈ x_t - pred
-            x0_recon = x_t - pred
-            if clip_denoised:
-                x0_recon = x0_recon.clamp(-1.0, 1.0)
-
-            if ns == 0:
-                # 마지막: 바로 x0
-                x_t = x0_recon
+        """section 10 검증 계수. y1=MRI(x_T), y2=병변."""
+        b=y1.shape[0]; dev=y1.device
+        steps=list(reversed(np.linspace(0,self.num_timesteps,self.sample_step+1,dtype=int).tolist()))
+        z_t=y1.clone()
+        z_cond=y1  # bridge 종점 (원본 z_sdf 자리)
+        for i in range(len(steps)-1):
+            cs,ns=steps[i],steps[i+1]
+            t=torch.full((b,),cs,device=dev,dtype=torch.long)
+            obj=self.denoise_fn(z_t, y2, timesteps=t)
+            z0r=z_t - obj
+            if clip_denoised: z0r=z0r.clamp(-1,1)
+            if ns==0:
+                z_t=z0r
             else:
-                # 중간: BBDM posterior 로 x_{t-1} 재구성
-                #   (project_context section 10 식과 동일 구조)
-                mt = self.m_t[cs]
-                mnt = self.m_t[ns]
-                vt = self.variance_t[cs]
-                vnt = self.variance_t[ns]
-                # posterior 분산 s2 (음수 방지 clamp)
-                s2 = torch.clamp(
-                    (vt - vnt * (1. - mt) ** 2 / ((1. - mnt) ** 2 + 1e-8))
-                    * vnt / (vt + 1e-8), min=0.0)
-                # noise 항 계수 (x_t 에서 결정적 성분을 뺀 잔차 방향)
-                coef_resid = torch.sqrt(torch.clamp((vnt - s2) / (vt + 1e-8), min=0.0))
-                resid = x_t - (1. - mt) * x0_recon - mt * y1
-                x_t = ((1. - mnt) * x0_recon
-                       + mnt * y1
-                       + coef_resid * resid
-                       + torch.sqrt(s2) * self.eta * torch.randn_like(x_t))
-
-        return x_t
+                mt=self.m_t[cs]; mnt=self.m_t[ns]
+                vt=self.variance_t[cs]; vnt=self.variance_t[ns]
+                s2=torch.clamp((vt - vnt*(1.-mt)**2/((1.-mnt)**2+1e-8))*vnt/(vt+1e-8),min=0)
+                z_t=((1.-mnt)*z0r + mnt*z_cond
+                     + torch.sqrt(torch.clamp((vnt-s2)/(vt+1e-8),min=0))*(z_t-(1.-mt)*z0r-mt*z_cond)
+                     + torch.sqrt(s2)*self.eta*torch.randn_like(z_t))
+        return z_t
