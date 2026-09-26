@@ -1,3 +1,4 @@
+
 """
 Conditional Latent DDPM (MRI->PET), two conditioning modes.
 
@@ -38,7 +39,7 @@ def load_pet_vqgan():
     st = torch.load(PET_VQGAN, map_location='cpu')
     m.encoder.load_state_dict(st['encoder']); m.decoder.load_state_dict(st['decoder']); m.vq.load_state_dict(st['vq'])
     m = m.to(device).eval()
-    for p in m.parameters(): p.requires_grad = False
+    for p in m.parameters(): p.requires_grad = False #frozen
     return m
 
 
@@ -49,7 +50,7 @@ def load_swin_encoder():
     st = torch.load(SWIN_ENC, map_location='cpu')
     enc.load_state_dict(st['encoder'])
     enc.eval()
-    for p in enc.parameters(): p.requires_grad = False
+    for p in enc.parameters(): p.requires_grad = False #frozen
     return enc
 
 

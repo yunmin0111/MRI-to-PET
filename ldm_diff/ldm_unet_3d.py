@@ -15,7 +15,7 @@ mode='concat' : z_mri is concatenated to the noisy latent on the channel axis
 mode='adagn'  : z_mri is NOT concatenated. Instead each ResBlock's GroupNorm is
                 modulated by (timestep emb) AND (a per-resblock projection of a
                 pooled z_mri), i.e. AdaGN-style scale/shift from the condition.
-"""
+"""argparse.ArgumentParser
 import math
 import torch
 import torch.nn as nn
